@@ -53,5 +53,5 @@ jobs:
         with:
           app-name: 'Logistics'
           slot-name: 'Production'
-          package: shell
+          package: node-app/shell
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_5806AE614B2E45338CEC3E1CCE1F2D48 }}
