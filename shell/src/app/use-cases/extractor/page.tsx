@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { usePersistentState, LooseJson, createNamespacedStorage } from "@/lib/persist";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -81,18 +82,44 @@ function truncate(text: string, max = 120): string {
   return text.slice(0, max - 1) + "…";
 }
 
+// Simple hash function for creating cache keys
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return Math.abs(hash).toString(36);
+}
+
+// Create cache key for extraction
+function createExtractionCacheKey(docId: string, colId: string, docText: string, column: Column, customTypes: CustomType[]): string {
+  const columnStr = JSON.stringify(column);
+  const customTypesStr = JSON.stringify(customTypes);
+  const inputStr = `${docId}|${colId}|${docText}|${columnStr}|${customTypesStr}`;
+  return simpleHash(inputStr);
+}
+
 export default function ExtractorUseCasePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [documents, setDocuments] = useState<UploadedDoc[]>([]);
-  const [columns, setColumns] = useState<Column[]>([]);
-  const [customTypes, setCustomTypes] = useState<CustomType[]>([]);
+  const [documents, setDocuments] = usePersistentState<UploadedDoc[]>("documents", [], { namespace: "extractor", version: 1 });
+  const [columns, setColumns] = usePersistentState<Column[]>("columns", [], { namespace: "extractor", version: 1 });
+  const [customTypes, setCustomTypes] = usePersistentState<CustomType[]>("customTypes", [], { namespace: "extractor", version: 1 });
   const [isAddingColumn, setIsAddingColumn] = useState(false);
   const [isDefiningType, setIsDefiningType] = useState(false);
-  // resultsByDoc[documentId][columnId] => value
-  const [resultsByDoc, setResultsByDoc] = useState<Record<string, Record<string, unknown>>>({});
+  // resultsByDoc[documentId][columnId] => value (persisted)
+  const [resultsByDoc, setResultsByDoc] = usePersistentState<Record<string, Record<string, LooseJson>>>(
+    "resultsByDoc",
+    {},
+    { namespace: "extractor", version: 1 }
+  );
   // loadingCells contains composite keys `${docId}::${colId}` while that cell is being populated
   const [loadingCells, setLoadingCells] = useState<Set<string>>(new Set());
   const [openColumnId, setOpenColumnId] = useState<string | null>(null);
+  
+  // Client-side cache for extraction results
+  const extractionCache = createNamespacedStorage("extractor-results");
 
   const baseTypes: BaseType[] = ["text", "number", "date", "boolean"];
 
@@ -165,10 +192,10 @@ export default function ExtractorUseCasePage() {
 
   function mergeExtractionResults(newResults: ExtractionResult[]) {
     setResultsByDoc((prev) => {
-      const next = { ...prev };
+      const next: Record<string, Record<string, LooseJson>> = { ...prev };
       for (const r of newResults) {
         const existingRow = next[r.documentId] ?? {};
-        next[r.documentId] = { ...existingRow, ...(r.data as Record<string, unknown>) };
+        next[r.documentId] = { ...existingRow, ...(r.data as Record<string, LooseJson>) };
       }
       return next;
     });
@@ -199,18 +226,54 @@ export default function ExtractorUseCasePage() {
     const docIds = targetDocs.map((d) => d.id);
     const colIds = [newColumn.id];
     markCellsLoading(docIds, colIds);
+    
+    // Check cache for each document
+    const cachedResults: ExtractionResult[] = [];
+    const uncachedDocs: UploadedDoc[] = [];
+    
+    for (const doc of targetDocs) {
+      const cacheKey = createExtractionCacheKey(doc.id, newColumn.id, doc.text, newColumn, customTypes);
+      const cached = extractionCache.get<unknown>(cacheKey);
+      if (cached) {
+        cachedResults.push({ documentId: doc.id, data: cached as Record<string, unknown> });
+      } else {
+        uncachedDocs.push(doc);
+      }
+    }
+    
+    // Merge cached results immediately
+    if (cachedResults.length > 0) {
+      mergeExtractionResults(cachedResults);
+    }
+    
+    // Only extract for uncached documents
+    if (uncachedDocs.length === 0) {
+      markCellsDone(docIds, colIds);
+      return;
+    }
+    
     try {
       const res = await fetch("/api/extractor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          documents: targetDocs.map((d) => ({ id: d.id, name: d.name, text: d.text })),
+          documents: uncachedDocs.map((d) => ({ id: d.id, name: d.name, text: d.text })),
           columns: [newColumn],
           customTypes,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as { results: ExtractionResult[] };
+      
+      // Cache new results
+      for (const result of data.results) {
+        const doc = uncachedDocs.find(d => d.id === result.documentId);
+        if (doc) {
+          const cacheKey = createExtractionCacheKey(doc.id, newColumn.id, doc.text, newColumn, customTypes);
+          extractionCache.set(cacheKey, result.data);
+        }
+      }
+      
       mergeExtractionResults(data.results);
     } catch (err) {
       console.error(err);
@@ -225,18 +288,75 @@ export default function ExtractorUseCasePage() {
     const docIds = newDocs.map((d) => d.id);
     const colIds = targetColumns.map((c) => c.id);
     markCellsLoading(docIds, colIds);
+    
+    // Check cache for each document-column combination
+    const cachedResults: ExtractionResult[] = [];
+    const uncachedRequests: { doc: UploadedDoc; columns: Column[] }[] = [];
+    
+    for (const doc of newDocs) {
+      const docCachedColumns: Column[] = [];
+      const docUncachedColumns: Column[] = [];
+      
+      for (const col of targetColumns) {
+        const cacheKey = createExtractionCacheKey(doc.id, col.id, doc.text, col, customTypes);
+        const cached = extractionCache.get<unknown>(cacheKey);
+        if (cached) {
+          cachedResults.push({ documentId: doc.id, data: cached as Record<string, unknown> });
+          docCachedColumns.push(col);
+        } else {
+          docUncachedColumns.push(col);
+        }
+      }
+      
+      if (docUncachedColumns.length > 0) {
+        uncachedRequests.push({ doc, columns: docUncachedColumns });
+      }
+    }
+    
+    // Merge cached results immediately
+    if (cachedResults.length > 0) {
+      mergeExtractionResults(cachedResults);
+    }
+    
+    // Only extract for uncached combinations
+    if (uncachedRequests.length === 0) {
+      markCellsDone(docIds, colIds);
+      return;
+    }
+    
     try {
+      const allUncachedDocs = uncachedRequests.map(r => r.doc);
+      const allUncachedColumns = Array.from(new Set(uncachedRequests.flatMap(r => r.columns)));
+      
       const res = await fetch("/api/extractor", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          documents: newDocs.map((d) => ({ id: d.id, name: d.name, text: d.text })),
-          columns: targetColumns,
+          documents: allUncachedDocs.map((d) => ({ id: d.id, name: d.name, text: d.text })),
+          columns: allUncachedColumns,
           customTypes,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as { results: ExtractionResult[] };
+      
+      // Cache new results
+      for (const result of data.results) {
+        const doc = allUncachedDocs.find(d => d.id === result.documentId);
+        if (doc) {
+          // Find which columns were extracted for this document
+          const request = uncachedRequests.find(r => r.doc.id === doc.id);
+          if (request) {
+            for (const col of request.columns) {
+              const cacheKey = createExtractionCacheKey(doc.id, col.id, doc.text, col, customTypes);
+              if (result.data[col.id] !== undefined) {
+                extractionCache.set(cacheKey, { [col.id]: result.data[col.id] });
+              }
+            }
+          }
+        }
+      }
+      
       mergeExtractionResults(data.results);
     } catch (err) {
       console.error(err);
@@ -257,6 +377,15 @@ export default function ExtractorUseCasePage() {
         </div>
 
         <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              extractionCache.clear();
+              alert("Cache cleared");
+            }}
+          >
+            Clear cache
+          </Button>
           <Dialog open={isDefiningType} onOpenChange={setIsDefiningType}>
             <DialogTrigger asChild>
               <Button variant="secondary">Define custom type</Button>
@@ -491,7 +620,7 @@ export default function ExtractorUseCasePage() {
                       <Button size="sm" variant="ghost" onClick={() => {
                         // remove associated results and loading states
                         setResultsByDoc((prev) => {
-                          const next = { ...prev };
+                          const next: Record<string, Record<string, LooseJson>> = { ...prev };
                           delete next[d.id];
                           return next;
                         });

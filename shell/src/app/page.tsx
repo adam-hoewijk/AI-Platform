@@ -32,11 +32,6 @@ export default function Home() {
             description: "Pull structured data from text",
           },
           {
-            href: "/use-cases/summarizer",
-            title: "Summarizer",
-            description: "Summarize documents and notes",
-          },
-          {
             href: "/use-cases/logistics",
             title: "Logistics",
             description: "Optimize routes, loads, and schedules",

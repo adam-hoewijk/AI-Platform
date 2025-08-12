@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { usePersistentState, createNamespacedStorage } from "@/lib/persist";
 
 type EditableSourceRow = { name: string; Longitude: string; Latitude: string };
 type AnyRow = Record<string, string | number | boolean | null | undefined>;
@@ -93,18 +94,42 @@ function valueToString(v: unknown): string {
   return String(v);
 }
 
+// Simple hash function for creating cache keys
+function simpleHash(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  return Math.abs(hash).toString(36);
+}
+
+// Create cache key from inputs
+function createCacheKey(sources: EditableSourceRow[], destinations: AnyRow[], batchSize: number): string {
+  const sourcesStr = JSON.stringify(sources.map(s => ({ name: s.name, Longitude: s.Longitude, Latitude: s.Latitude })));
+  const destinationsStr = JSON.stringify(destinations.map(d => ({ Longitude: d.Longitude, Latitude: d.Latitude })));
+  const inputStr = `${sourcesStr}|${destinationsStr}|${batchSize}`;
+  return simpleHash(inputStr);
+}
+
 export default function LogisticsUseCasePage() {
-  const [sources, setSources] = useState<EditableSourceRow[]>([
-    { name: "", Longitude: "", Latitude: "" },
-  ]);
-  const [destinations, setDestinations] = useState<AnyRow[]>([]);
-  const [destFileName, setDestFileName] = useState<string>("default-destinations.csv");
-  const [batchSize, setBatchSize] = useState<number>(300);
+  const [sources, setSources] = usePersistentState<EditableSourceRow[]>
+    ("sources", [{ name: "", Longitude: "", Latitude: "" }], { namespace: "logistics", version: 1 });
+  const [destinations, setDestinations] = usePersistentState<AnyRow[]>
+    ("destinations", [], { namespace: "logistics", version: 1 });
+  const [destFileName, setDestFileName] = usePersistentState<string>
+    ("destFileName", "default-destinations.csv", { namespace: "logistics", version: 1 });
+  const [batchSize, setBatchSize] = usePersistentState<number>
+    ("batchSize", 300, { namespace: "logistics", version: 1 });
   const [rows, setRows] = useState<AnyRow[]>([]);
   type SummaryRow = { source: string; avgDistance: number; avgDuration: number; tonKm: number };
   const [summary, setSummary] = useState<SummaryRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  
+  // Client-side cache for results
+  const resultsCache = createNamespacedStorage("logistics-results");
 
   useEffect(() => {
     // Load default destinations CSV from public
@@ -155,6 +180,17 @@ export default function LogisticsUseCasePage() {
       toast.error(`Destinations CSV has ${invalid} rows with invalid coordinates`);
       return;
     }
+
+    // Check cache first
+    const cacheKey = createCacheKey(sources, destinations, batchSize);
+    const cached = resultsCache.get<{ rows: AnyRow[]; summary: SummaryRow[] }>(cacheKey);
+    if (cached) {
+      setRows(cached.rows);
+      setSummary(cached.summary);
+      toast.success("Loaded results from cache");
+      return;
+    }
+
     setLoading(true);
     setProgress({ done: 0, total: preparedSources.length * Math.ceil(destinations.length / batchSize) });
     try {
@@ -228,6 +264,10 @@ export default function LogisticsUseCasePage() {
           newSummary.push({ source: name, avgDistance: avgD, avgDuration: avgT, tonKm });
         }
         setSummary(newSummary);
+        
+        // Cache the results
+        resultsCache.set(cacheKey, { rows: finalRows, summary: newSummary });
+        toast.success("Results calculated and cached");
       }
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to calculate");
@@ -292,7 +332,7 @@ export default function LogisticsUseCasePage() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setSources((s) => [...s, { name: "", Longitude: "", Latitude: "" }])}
+                    onClick={() => setSources((s: EditableSourceRow[]) => [...s, { name: "", Longitude: "", Latitude: "" }])}
                   >
                     + Add source
                   </Button>
@@ -322,9 +362,9 @@ export default function LogisticsUseCasePage() {
                           <Input
                             placeholder="Name"
                             value={s.name}
-                            onChange={(e) => {
+                              onChange={(e) => {
                               const v = e.target.value;
-                              setSources((prev) => prev.map((row, i) => (i === idx ? { ...row, name: v } : row)));
+                                setSources((prev: EditableSourceRow[]) => prev.map((row, i) => (i === idx ? { ...row, name: v } : row)));
                             }}
                           />
                         </td>
@@ -332,9 +372,9 @@ export default function LogisticsUseCasePage() {
                           <Input
                             placeholder="Longitude"
                             value={s.Longitude}
-                            onChange={(e) => {
+                              onChange={(e) => {
                               const v = e.target.value;
-                              setSources((prev) => prev.map((row, i) => (i === idx ? { ...row, Longitude: v } : row)));
+                                setSources((prev: EditableSourceRow[]) => prev.map((row, i) => (i === idx ? { ...row, Longitude: v } : row)));
                             }}
                           />
                         </td>
@@ -342,9 +382,9 @@ export default function LogisticsUseCasePage() {
                           <Input
                             placeholder="Latitude"
                             value={s.Latitude}
-                            onChange={(e) => {
+                              onChange={(e) => {
                               const v = e.target.value;
-                              setSources((prev) => prev.map((row, i) => (i === idx ? { ...row, Latitude: v } : row)));
+                                setSources((prev: EditableSourceRow[]) => prev.map((row, i) => (i === idx ? { ...row, Latitude: v } : row)));
                             }}
                           />
                         </td>
@@ -352,7 +392,7 @@ export default function LogisticsUseCasePage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setSources((prev) => prev.filter((_, i) => i !== idx))}
+                              onClick={() => setSources((prev: EditableSourceRow[]) => prev.filter((_, i) => i !== idx))}
                             disabled={sources.length === 1}
                           >
                             Remove
@@ -439,6 +479,16 @@ export default function LogisticsUseCasePage() {
                 disabled={loading}
               >
                 Clear results
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  resultsCache.clear();
+                  toast.success("Cache cleared");
+                }}
+                disabled={loading}
+              >
+                Clear cache
               </Button>
               <Button onClick={run} disabled={loading}>
                 {loading ? "Calculating..." : "Calculate"}
