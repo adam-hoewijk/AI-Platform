@@ -8,16 +8,21 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
+import { usePersistentState } from "@/lib/persist";
 
 export default function ChatUseCasePage() {
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [input, setInput] = usePersistentState<string>("input", "", { namespace: "chat", version: 1 });
+  const [messages, setMessages] = usePersistentState<{ role: "user" | "assistant"; content: string }[]>(
+    "messages",
+    [],
+    { namespace: "chat", version: 1 }
+  );
   const [isLoading, setIsLoading] = useState(false);
 
   async function handleSend() {
     if (!input.trim()) return;
     const userMessage = { role: "user" as const, content: input };
-    setMessages((m) => [...m, userMessage]);
+    setMessages((m: { role: "user" | "assistant"; content: string }[]) => [...m, userMessage]);
     setInput("");
     setIsLoading(true);
     try {
@@ -28,7 +33,7 @@ export default function ChatUseCasePage() {
       });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as { role: "assistant"; content: string };
-      setMessages((m) => [...m, data]);
+      setMessages((m: { role: "user" | "assistant"; content: string }[]) => [...m, data]);
     } catch (err: unknown) {
       console.error(err);
       toast.error("Failed to get response from model");
@@ -74,7 +79,7 @@ export default function ChatUseCasePage() {
           </div>
         </CardContent>
         <CardFooter className="justify-end gap-2">
-          <Button variant="outline" onClick={() => setMessages([])} disabled={isLoading}>
+           <Button variant="outline" onClick={() => setMessages([])} disabled={isLoading}>
             Clear
           </Button>
           <Button onClick={handleSend} disabled={isLoading}>

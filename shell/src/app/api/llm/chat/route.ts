@@ -14,7 +14,7 @@ const BodySchema = z.object({
 function getAzureClient() {
   const apiKey = process.env.AZURE_OPENAI_API_KEY;
   const endpoint = process.env.AZURE_OPENAI_ENDPOINT; // e.g. https://your-resource.openai.azure.com
-  const apiVersion = process.env.AZURE_OPENAI_API_VERSION ?? "2024-06-01";
+  const apiVersion = process.env.AZURE_OPENAI_API_VERSION ?? "2024-12-01-preview";
   if (!apiKey || !endpoint) {
     throw new Error("Missing Azure OpenAI environment variables");
   }
@@ -39,7 +39,6 @@ export async function POST(req: NextRequest) {
     const completion = await client.chat.completions.create({
       model: deployment,
       messages,
-      temperature: 0.3,
     });
 
     const choice = completion.choices?.[0]?.message;
