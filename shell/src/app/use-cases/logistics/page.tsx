@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -129,7 +129,7 @@ export default function LogisticsUseCasePage() {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   
   // Client-side cache for results
-  const resultsCache = createNamespacedStorage("logistics-results");
+  const resultsCacheRef = useRef(createNamespacedStorage("logistics-results"));
 
   useEffect(() => {
     // Load default destinations CSV from public
@@ -145,6 +145,20 @@ export default function LogisticsUseCasePage() {
     }
     loadDefault();
   }, []);
+
+  // Check for cached results on component mount
+  useEffect(() => {
+    // Only check for cached results if we have sources and destinations loaded
+    if (sources.length > 0 && destinations.length > 0) {
+      const cacheKey = createCacheKey(sources, destinations, batchSize);
+      const cached = resultsCacheRef.current.get<{ rows: AnyRow[]; summary: SummaryRow[] }>(cacheKey);
+      if (cached) {
+        setRows(cached.rows);
+        setSummary(cached.summary);
+        toast.success("Loaded results from cache");
+      }
+    }
+  }, [sources, destinations, batchSize]);
 
   function normalizeNumberString(raw: string): string {
     const s = (raw || "").trim();
@@ -183,7 +197,7 @@ export default function LogisticsUseCasePage() {
 
     // Check cache first
     const cacheKey = createCacheKey(sources, destinations, batchSize);
-    const cached = resultsCache.get<{ rows: AnyRow[]; summary: SummaryRow[] }>(cacheKey);
+    const cached = resultsCacheRef.current.get<{ rows: AnyRow[]; summary: SummaryRow[] }>(cacheKey);
     if (cached) {
       setRows(cached.rows);
       setSummary(cached.summary);
@@ -266,7 +280,7 @@ export default function LogisticsUseCasePage() {
         setSummary(newSummary);
         
         // Cache the results
-        resultsCache.set(cacheKey, { rows: finalRows, summary: newSummary });
+        resultsCacheRef.current.set(cacheKey, { rows: finalRows, summary: newSummary });
         toast.success("Results calculated and cached");
       }
     } catch (e: unknown) {
@@ -483,7 +497,7 @@ export default function LogisticsUseCasePage() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  resultsCache.clear();
+                  resultsCacheRef.current.clear();
                   toast.success("Cache cleared");
                 }}
                 disabled={loading}
