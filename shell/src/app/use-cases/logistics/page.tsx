@@ -1,0 +1,490 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { toast } from "sonner";
+
+type EditableSourceRow = { name: string; Longitude: string; Latitude: string };
+type AnyRow = Record<string, string | number | boolean | null | undefined>;
+
+function parseCsv(text: string): AnyRow[] {
+  // Very simple CSV parser (no quotes handling). Detect delimiter and european decimals.
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return [];
+  const headerLine = lines[0];
+  const commaCount = (headerLine.match(/,/g) || []).length;
+  const semiCount = (headerLine.match(/;/g) || []).length;
+  const delim = semiCount > commaCount ? ";" : ",";
+  const header = headerLine.split(delim).map((h) => h.trim());
+
+  return lines.slice(1).map((line) => {
+    const cols = line.split(delim);
+    const obj: AnyRow = {};
+    header.forEach((h, i) => {
+      const raw = (cols[i] ?? "").trim();
+      if (raw === "") {
+        obj[h] = "";
+        return;
+      }
+      // normalize european decimal comma to dot if there is no thousand separator logic
+      const normalized = raw.includes(",") && !raw.includes(".") ? raw.replace(/,/g, ".") : raw;
+      const maybeNum = Number(normalized);
+      obj[h] = Number.isFinite(maybeNum) ? maybeNum : raw;
+    });
+    return obj;
+  });
+}
+
+function toCsv(rows: AnyRow[]): string {
+  if (rows.length === 0) return "";
+  const headers = Array.from(
+    rows.reduce<Set<string>>((acc, r) => {
+      Object.keys(r).forEach((k) => acc.add(k));
+      return acc;
+    }, new Set())
+  );
+  const headerLine = headers.join(",");
+  const lines = rows.map((r) => headers.map((h) => `${r[h] ?? ""}`).join(","));
+  return [headerLine, ...lines].join("\n");
+}
+
+function download(filename: string, content: string, mime = "text/csv;charset=utf-8") {
+  const blob = new Blob([content], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function toHtmlTable(rows: AnyRow[]): string {
+  if (rows.length === 0) return "";
+  const headers = Array.from(
+    rows.reduce<Set<string>>((acc, r) => {
+      Object.keys(r).forEach((k) => acc.add(k));
+      return acc;
+    }, new Set())
+  );
+  const thead = `<tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr>`;
+  const tbody = rows
+    .map((r) => `<tr>${headers.map((h) => `<td>${escapeHtml(valueToString(r[h]))}</td>`).join("")}</tr>`) 
+    .join("");
+  return `<table>${thead}${tbody}</table>`;
+}
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function valueToString(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  return String(v);
+}
+
+export default function LogisticsUseCasePage() {
+  const [sources, setSources] = useState<EditableSourceRow[]>([
+    { name: "", Longitude: "", Latitude: "" },
+  ]);
+  const [destinations, setDestinations] = useState<AnyRow[]>([]);
+  const [destFileName, setDestFileName] = useState<string>("default-destinations.csv");
+  const [batchSize, setBatchSize] = useState<number>(300);
+  const [rows, setRows] = useState<AnyRow[]>([]);
+  type SummaryRow = { source: string; avgDistance: number; avgDuration: number; tonKm: number };
+  const [summary, setSummary] = useState<SummaryRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
+  useEffect(() => {
+    // Load default destinations CSV from public
+    async function loadDefault() {
+      try {
+        const res = await fetch("/default-destinations.csv", { cache: "no-store" });
+        const text = await res.text();
+        setDestinations(parseCsv(text));
+        setDestFileName("default-destinations.csv");
+      } catch {
+        // ignore
+      }
+    }
+    loadDefault();
+  }, []);
+
+  function normalizeNumberString(raw: string): string {
+    const s = (raw || "").trim();
+    if (s === "") return "";
+    return s.includes(",") && !s.includes(".") ? s.replace(/,/g, ".") : s;
+  }
+
+  async function run() {
+    const preparedSources = sources
+      .map((s) => ({
+        name: s.name.trim(),
+        Longitude: Number(normalizeNumberString(s.Longitude)),
+        Latitude: Number(normalizeNumberString(s.Latitude)),
+      }))
+      .filter((s) => s.name && Number.isFinite(s.Longitude) && Number.isFinite(s.Latitude));
+
+    if (preparedSources.length === 0) {
+      toast.error("Please add at least one valid source");
+      return;
+    }
+    if (destinations.length === 0) {
+      toast.error("Please provide at least one destination");
+      return;
+    }
+    if (!("Longitude" in destinations[0]) || !("Latitude" in destinations[0])) {
+      toast.error("Destinations CSV must include 'Longitude' and 'Latitude' columns");
+      return;
+    }
+    const invalid = destinations.filter(
+      (d) => !Number.isFinite(Number(d.Longitude)) || !Number.isFinite(Number(d.Latitude))
+    ).length;
+    if (invalid > 0) {
+      toast.error(`Destinations CSV has ${invalid} rows with invalid coordinates`);
+      return;
+    }
+    setLoading(true);
+    setProgress({ done: 0, total: preparedSources.length * Math.ceil(destinations.length / batchSize) });
+    try {
+      const body = {
+        sources: preparedSources,
+        destinations: destinations.map((d) => ({ ...d, Longitude: Number(d.Longitude), Latitude: Number(d.Latitude) })),
+        batchSize,
+      };
+
+      const res = await fetch("/api/logistics/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(await res.text());
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      if (!reader) throw new Error("No response body");
+      let finalRows: AnyRow[] | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx;
+        while ((idx = buffer.indexOf("\n")) >= 0) {
+          const line = buffer.slice(0, idx).trim();
+          buffer = buffer.slice(idx + 1);
+          if (!line) continue;
+          const evt = JSON.parse(line) as
+            | { type: "progress"; done: number; total: number; source: string; batchIndex: number }
+            | { type: "result"; rows: AnyRow[] }
+            | { type: "error"; message: string };
+          if (evt.type === "progress") {
+            setProgress({ done: evt.done, total: evt.total });
+          } else if (evt.type === "result") {
+            finalRows = evt.rows;
+          } else if (evt.type === "error") {
+            throw new Error(evt.message);
+          }
+        }
+      }
+
+      if (finalRows) {
+        setRows(finalRows);
+        const sourceNames = preparedSources.map((s) => s.name);
+        const headers = Object.keys(finalRows[0] || {});
+        const weightKey = headers.find((h) => h.toLowerCase() === "weight");
+        const newSummary: SummaryRow[] = [];
+        for (const name of sourceNames) {
+          const distKey = `distance_${name} (meters)`;
+          const durKey = `duration_${name} (seconds)`;
+          const values = finalRows
+            .map((r) => ({ d: Number(r[distKey]), t: Number(r[durKey]) }))
+            .filter((v) => Number.isFinite(v.d) && Number.isFinite(v.t));
+          const avgD = values.length ? values.reduce((acc, v) => acc + v.d, 0) / values.length : 0;
+          const avgT = values.length ? values.reduce((acc, v) => acc + v.t, 0) / values.length : 0;
+
+          // Ton-km sum per source: sum over destinations of (weight tons * distance km)
+          const tonKm = finalRows.reduce((acc, r) => {
+            const dMeters = Number(r[distKey]);
+            if (!Number.isFinite(dMeters)) return acc;
+            const dKm = dMeters / 1000;
+            const w = weightKey ? Number(r[weightKey]) : 0;
+            if (!Number.isFinite(w)) return acc;
+            return acc + w * dKm;
+          }, 0);
+
+          newSummary.push({ source: name, avgDistance: avgD, avgDuration: avgT, tonKm });
+        }
+        setSummary(newSummary);
+      }
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to calculate");
+    } finally {
+      setLoading(false);
+      setProgress(null);
+    }
+  }
+
+  function exportCsv() {
+    const csv = [
+      "Sources,Average Distance (meters),Average Duration (seconds),Ton Km (sum)",
+      ...summary.map((s) => `${s.source},${Math.round(s.avgDistance)},${Math.round(s.avgDuration)},${Math.round(s.tonKm)}`),
+    ].join("\n");
+    download("logistics_summary.csv", csv);
+  }
+
+  function exportExcel() {
+    const html = (() => {
+      const rows = [
+        ["Sources", "Average Distance (meters)", "Average Duration (seconds)", "Ton Km (sum)"],
+        ...summary.map((s) => [
+          s.source,
+          Math.round(s.avgDistance).toString(),
+          Math.round(s.avgDuration).toString(),
+          Math.round(s.tonKm).toString(),
+        ]),
+      ];
+      const thead = `<tr>${rows[0].map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr>`;
+      const tbody = rows
+        .slice(1)
+        .map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join("")}</tr>`)
+        .join("");
+      return `<table>${thead}${tbody}</table>`;
+    })();
+    const excelContent = `\ufeff<html><head><meta charset="UTF-8"></head><body>${html}</body></html>`;
+    download("logistics_summary.xls", excelContent, "application/vnd.ms-excel");
+  }
+
+  const headers = useMemo(() => {
+    return Array.from(
+      rows.reduce<Set<string>>((acc, r) => {
+        Object.keys(r).forEach((k) => acc.add(k));
+        return acc;
+      }, new Set())
+    );
+  }, [rows]);
+
+  return (
+    <main className="container mx-auto p-6 max-w-5xl">
+      <Card>
+        <CardHeader>
+          <CardTitle>Logistics Calculator</CardTitle>
+          <CardDescription>Compute OSRM distance and duration from multiple sources to destination list (batched).</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="grid md:grid-cols-2 gap-6">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Sources</Label>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSources((s) => [...s, { name: "", Longitude: "", Latitude: "" }])}
+                  >
+                    + Add source
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSources([{ name: "", Longitude: "", Latitude: "" }])}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+              <div className="overflow-auto border rounded-md">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40">
+                    <tr>
+                      <th className="text-left p-2 border-b">Name</th>
+                      <th className="text-left p-2 border-b">Longitude</th>
+                      <th className="text-left p-2 border-b">Latitude</th>
+                      <th className="text-left p-2 border-b">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sources.map((s, idx) => (
+                      <tr key={idx} className="odd:bg-muted/20">
+                        <td className="p-2 border-b align-top w-[30%]">
+                          <Input
+                            placeholder="Name"
+                            value={s.name}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setSources((prev) => prev.map((row, i) => (i === idx ? { ...row, name: v } : row)));
+                            }}
+                          />
+                        </td>
+                        <td className="p-2 border-b align-top">
+                          <Input
+                            placeholder="Longitude"
+                            value={s.Longitude}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setSources((prev) => prev.map((row, i) => (i === idx ? { ...row, Longitude: v } : row)));
+                            }}
+                          />
+                        </td>
+                        <td className="p-2 border-b align-top">
+                          <Input
+                            placeholder="Latitude"
+                            value={s.Latitude}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setSources((prev) => prev.map((row, i) => (i === idx ? { ...row, Latitude: v } : row)));
+                            }}
+                          />
+                        </td>
+                        <td className="p-2 border-b align-top w-[1%] whitespace-nowrap">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSources((prev) => prev.filter((_, i) => i !== idx))}
+                            disabled={sources.length === 1}
+                          >
+                            Remove
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-muted-foreground">Enter at least one valid source with name and coordinates.</p>
+            </div>
+            <div className="space-y-3">
+              <Label>Destinations</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const text = await file.text();
+                    const rows = parseCsv(text);
+                    if (rows.length && (!("Longitude" in rows[0]) || !("Latitude" in rows[0]))) {
+                      toast.error("CSV must include 'Longitude' and 'Latitude' headers");
+                      return;
+                    }
+                    setDestinations(rows);
+                    setDestFileName(file.name);
+                  }}
+                />
+                <Button
+                  variant="outline"
+                  onClick={async () => {
+                    try {
+                      const res = await fetch("/default-destinations.csv", { cache: "no-store" });
+                      const text = await res.text();
+                      setDestinations(parseCsv(text));
+                      setDestFileName("default-destinations.csv");
+                    } catch {}
+                  }}
+                >
+                  Reset to default
+                </Button>
+              </div>
+              <div className="text-xs text-muted-foreground">Current file: {destFileName} ({destinations.length} rows)</div>
+              <div className="overflow-auto border rounded-md">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/40">
+                    <tr>
+                      {destinations.length > 0 &&
+                        Object.keys(destinations[0]).map((h) => (
+                          <th key={h} className="text-left p-2 border-b">{h}</th>
+                        ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {destinations.slice(0, 10).map((r, i) => (
+                      <tr key={i} className="odd:bg-muted/20">
+                        {Object.keys(destinations[0] || {}).map((h) => (
+                          <td key={h} className="p-2 border-b align-top">{String(r[h] ?? "")}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-xs text-muted-foreground">Preview shows first 10 rows. Required columns: Longitude, Latitude. Optional: Weight (tons).</p>
+            </div>
+          </div>
+
+          <div className="grid md:grid-cols-3 gap-4 items-end">
+            <div className="space-y-2">
+              <Label htmlFor="batch">Batch size</Label>
+              <Input id="batch" type="number" value={batchSize} onChange={(e) => setBatchSize(Number(e.target.value || 0))} />
+            </div>
+            <div className="md:col-span-2 flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setRows([]);
+                  setSummary([]);
+                }}
+                disabled={loading}
+              >
+                Clear results
+              </Button>
+              <Button onClick={run} disabled={loading}>
+                {loading ? "Calculating..." : "Calculate"}
+              </Button>
+              <Button onClick={exportCsv} disabled={summary.length === 0}>
+                Export CSV
+              </Button>
+              <Button onClick={exportExcel} disabled={summary.length === 0}>
+                Export Excel
+              </Button>
+            </div>
+          </div>
+
+          {progress && (
+            <div className="text-sm text-muted-foreground">Progress: {progress.done} / {progress.total} batches</div>
+          )}
+
+          {summary.length > 0 && (
+            <div className="overflow-auto border rounded-md">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40">
+                  <tr>
+                    <th className="text-left p-2 border-b">Sources</th>
+                    <th className="text-left p-2 border-b">Average Distance (meters)</th>
+                    <th className="text-left p-2 border-b">Average Duration (seconds)</th>
+                    <th className="text-left p-2 border-b">Ton Km (sum)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.map((s) => (
+                    <tr key={s.source} className="odd:bg-muted/20">
+                      <td className="p-2 border-b">{s.source}</td>
+                      <td className="p-2 border-b">{Math.round(s.avgDistance)}</td>
+                      <td className="p-2 border-b">{Math.round(s.avgDuration)}</td>
+                      <td className="p-2 border-b">{Math.round(s.tonKm)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+        <CardFooter className="justify-end"></CardFooter>
+      </Card>
+    </main>
+  );
+}
+
+

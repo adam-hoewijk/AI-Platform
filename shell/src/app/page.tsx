@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
@@ -20,49 +19,39 @@ export default function Home() {
         </nav>
       </header>
 
-      <Tabs defaultValue="chat" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="chat">Chat</TabsTrigger>
-          <TabsTrigger value="extract">Extractor</TabsTrigger>
-          <TabsTrigger value="summarize">Summarizer</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="chat" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>LLM Chat</CardTitle>
-              <CardDescription>Talk to your Azure OpenAI model</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm text-muted-foreground">Placeholder chat. Go to <Link className="underline" href="/use-cases/chat">full chat</Link>.</div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="extract" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Data Extractor</CardTitle>
-              <CardDescription>Pull structured data from text</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm text-muted-foreground">Placeholder extractor. See <Link className="underline" href="/use-cases/extractor">details</Link>.</div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="summarize" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Summarizer</CardTitle>
-              <CardDescription>Summarize documents and notes</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="text-sm text-muted-foreground">Placeholder summarizer. See <Link className="underline" href="/use-cases/summarizer">details</Link>.</div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      <section className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {[
+          {
+            href: "/use-cases/chat",
+            title: "Chat",
+            description: "Talk to your Azure OpenAI model",
+          },
+          {
+            href: "/use-cases/extractor",
+            title: "Extractor",
+            description: "Pull structured data from text",
+          },
+          {
+            href: "/use-cases/summarizer",
+            title: "Summarizer",
+            description: "Summarize documents and notes",
+          },
+          {
+            href: "/use-cases/logistics",
+            title: "Logistics",
+            description: "Optimize routes, loads, and schedules",
+          },
+        ].map((app) => (
+          <Link key={app.href} href={app.href} className="group block" aria-label={app.title}>
+            <Card className="h-full aspect-square rounded-xl transition-colors group-hover:bg-muted/50">
+              <CardHeader>
+                <CardTitle className="text-lg">{app.title}</CardTitle>
+                <CardDescription>{app.description}</CardDescription>
+              </CardHeader>
+            </Card>
+          </Link>
+        ))}
+      </section>
     </main>
   );
 }
