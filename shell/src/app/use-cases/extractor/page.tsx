@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePersistentState, LooseJson, createNamespacedStorage } from "@/lib/persist";
@@ -197,6 +197,7 @@ export default function ExtractorUseCasePage() {
     setResultsByDoc((prev) => {
       const next: Record<string, Record<string, LooseJson>> = {};
       for (const [docId, data] of Object.entries(prev)) {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { [columnId]: _removed, ...rest } = data;
         next[docId] = rest;
       }
@@ -225,9 +226,9 @@ export default function ExtractorUseCasePage() {
     
     for (const doc of targetDocs) {
       const cacheKey = createExtractionCacheKey(doc.id, newColumn.id, doc.text, newColumn, customTypes);
-      const cached = extractionCache.get<unknown>(cacheKey);
+      const cached = extractionCache.get<Record<string, LooseJson>>(cacheKey);
       if (cached) {
-        cachedResults.push({ documentId: doc.id, data: cached as Record<string, unknown> });
+        cachedResults.push({ documentId: doc.id, data: cached });
       } else {
         uncachedDocs.push(doc);
       }
@@ -261,8 +262,8 @@ export default function ExtractorUseCasePage() {
       for (const result of data.results) {
         const doc = uncachedDocs.find(d => d.id === result.documentId);
         if (doc) {
-          const cacheKey = createExtractionCacheKey(doc.id, newColumn.id, doc.text, newColumn, customTypes);
-          extractionCache.set(cacheKey, result.data);
+                  const cacheKey = createExtractionCacheKey(doc.id, newColumn.id, doc.text, newColumn, customTypes);
+        extractionCache.set(cacheKey, result.data as Record<string, LooseJson>);
         }
       }
       
@@ -291,9 +292,9 @@ export default function ExtractorUseCasePage() {
       
       for (const col of targetColumns) {
         const cacheKey = createExtractionCacheKey(doc.id, col.id, doc.text, col, customTypes);
-        const cached = extractionCache.get<unknown>(cacheKey);
+        const cached = extractionCache.get<Record<string, LooseJson>>(cacheKey);
         if (cached) {
-          cachedResults.push({ documentId: doc.id, data: cached as Record<string, unknown> });
+          cachedResults.push({ documentId: doc.id, data: cached });
           docCachedColumns.push(col);
         } else {
           docUncachedColumns.push(col);
@@ -342,7 +343,7 @@ export default function ExtractorUseCasePage() {
             for (const col of request.columns) {
               const cacheKey = createExtractionCacheKey(doc.id, col.id, doc.text, col, customTypes);
               if (result.data[col.id] !== undefined) {
-                extractionCache.set(cacheKey, { [col.id]: result.data[col.id] });
+                extractionCache.set(cacheKey, { [col.id]: result.data[col.id] } as Record<string, LooseJson>);
               }
             }
           }

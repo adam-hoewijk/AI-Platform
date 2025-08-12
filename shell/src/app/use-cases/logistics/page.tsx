@@ -65,6 +65,7 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#039;");
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function valueToString(v: unknown): string {
   if (v === null || v === undefined) return "";
   return String(v);
@@ -298,6 +299,7 @@ export default function LogisticsUseCasePage() {
     download("logistics_summary.xls", excelContent, "application/vnd.ms-excel");
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const headers = useMemo(() => {
     return Array.from(
       rows.reduce<Set<string>>((acc, r) => {
