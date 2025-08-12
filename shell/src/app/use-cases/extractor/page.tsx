@@ -123,12 +123,7 @@ export default function ExtractorUseCasePage() {
 
   const baseTypes: BaseType[] = ["text", "number", "date", "boolean"];
 
-  // Derived map for quick custom type lookup
-  const customTypeMap = useMemo(() => {
-    const map = new Map<string, CustomType>();
-    for (const t of customTypes) map.set(t.name, t);
-    return map;
-  }, [customTypes]);
+
 
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -149,10 +144,7 @@ export default function ExtractorUseCasePage() {
     setDocuments((prev) => prev.filter((d) => d.id !== id));
   }
 
-  function addColumn(col: Omit<Column, "id">) {
-    // Not used directly anymore for extraction flow — see onSubmit in dialog where we need the created id synchronously
-    setColumns((prev) => [...prev, { ...col, id: randomId("col") }]);
-  }
+
 
   function removeColumn(id: string) {
     setColumns((prev) => prev.filter((c) => c.id !== id));
@@ -203,7 +195,7 @@ export default function ExtractorUseCasePage() {
 
   function cleanupColumnState(columnId: string) {
     setResultsByDoc((prev) => {
-      const next: Record<string, Record<string, unknown>> = {};
+      const next: Record<string, Record<string, LooseJson>> = {};
       for (const [docId, data] of Object.entries(prev)) {
         const { [columnId]: _removed, ...rest } = data;
         next[docId] = rest;

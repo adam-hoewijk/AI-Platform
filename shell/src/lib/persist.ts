@@ -99,6 +99,7 @@ export function usePersistentState<T extends LooseJson>(
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state, key, version, debounceMs]);
 
   function clear() {

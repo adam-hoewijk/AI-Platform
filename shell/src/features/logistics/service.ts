@@ -1,4 +1,4 @@
-import { CalculateRequest, Destination, EnrichedDestination, Source } from "./schema";
+import { CalculateRequest, EnrichedDestination } from "./schema";
 import { fetchTableForSource } from "@/server/osrm/table";
 
 function toCoordinate(d: { Longitude: number; Latitude: number }) {

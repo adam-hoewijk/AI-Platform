@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { usePersistentState, createNamespacedStorage } from "@/lib/persist";
@@ -40,18 +40,7 @@ function parseCsv(text: string): AnyRow[] {
   });
 }
 
-function toCsv(rows: AnyRow[]): string {
-  if (rows.length === 0) return "";
-  const headers = Array.from(
-    rows.reduce<Set<string>>((acc, r) => {
-      Object.keys(r).forEach((k) => acc.add(k));
-      return acc;
-    }, new Set())
-  );
-  const headerLine = headers.join(",");
-  const lines = rows.map((r) => headers.map((h) => `${r[h] ?? ""}`).join(","));
-  return [headerLine, ...lines].join("\n");
-}
+
 
 function download(filename: string, content: string, mime = "text/csv;charset=utf-8") {
   const blob = new Blob([content], { type: mime });
@@ -65,20 +54,7 @@ function download(filename: string, content: string, mime = "text/csv;charset=ut
   URL.revokeObjectURL(url);
 }
 
-function toHtmlTable(rows: AnyRow[]): string {
-  if (rows.length === 0) return "";
-  const headers = Array.from(
-    rows.reduce<Set<string>>((acc, r) => {
-      Object.keys(r).forEach((k) => acc.add(k));
-      return acc;
-    }, new Set())
-  );
-  const thead = `<tr>${headers.map((h) => `<th>${escapeHtml(h)}</th>`).join("")}</tr>`;
-  const tbody = rows
-    .map((r) => `<tr>${headers.map((h) => `<td>${escapeHtml(valueToString(r[h]))}</td>`).join("")}</tr>`) 
-    .join("");
-  return `<table>${thead}${tbody}</table>`;
-}
+
 
 function escapeHtml(s: string): string {
   return s
@@ -144,6 +120,7 @@ export default function LogisticsUseCasePage() {
       }
     }
     loadDefault();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Check for cached results on component mount
