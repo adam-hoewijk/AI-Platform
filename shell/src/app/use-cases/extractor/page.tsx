@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePersistentState, LooseJson, createNamespacedStorage } from "@/lib/persist";
+import { useModelConfig } from "@/lib/model-config";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -120,6 +121,7 @@ export default function ExtractorUseCasePage() {
   
   // Client-side cache for extraction results
   const extractionCache = createNamespacedStorage("extractor-results");
+  const [modelConfig] = useModelConfig();
 
   const baseTypes: BaseType[] = ["text", "number", "date", "boolean"];
 
@@ -253,6 +255,7 @@ export default function ExtractorUseCasePage() {
           documents: uncachedDocs.map((d) => ({ id: d.id, name: d.name, text: d.text })),
           columns: [newColumn],
           customTypes,
+          modelConfig,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -328,6 +331,7 @@ export default function ExtractorUseCasePage() {
           documents: allUncachedDocs.map((d) => ({ id: d.id, name: d.name, text: d.text })),
           columns: allUncachedColumns,
           customTypes,
+          modelConfig,
         }),
       });
       if (!res.ok) throw new Error(await res.text());

@@ -9,6 +9,14 @@ const MessageSchema = z.object({
 
 const BodySchema = z.object({
   messages: z.array(MessageSchema).min(1),
+  modelConfig: z.object({
+    reasoning: z.object({
+      effort: z.enum(["minimal", "low", "medium", "high"]),
+    }),
+    text: z.object({
+      verbosity: z.enum(["low", "medium", "high"]),
+    }),
+  }).optional(),
 });
 
 function getAzureClient() {
@@ -29,7 +37,7 @@ function getAzureClient() {
 export async function POST(req: NextRequest) {
   try {
     const json = await req.json();
-    const { messages } = BodySchema.parse(json);
+    const { messages, modelConfig } = BodySchema.parse(json);
 
     const client = getAzureClient();
     const deployment = process.env.AZURE_OPENAI_DEPLOYMENT as string; // your model deployment name
@@ -39,6 +47,10 @@ export async function POST(req: NextRequest) {
     const completion = await client.chat.completions.create({
       model: deployment,
       messages,
+      ...(modelConfig && {
+        reasoning_effort: modelConfig.reasoning.effort,
+        verbosity: modelConfig.text.verbosity,
+      }),
     });
 
     const choice = completion.choices?.[0]?.message;

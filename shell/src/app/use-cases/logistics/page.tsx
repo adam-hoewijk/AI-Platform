@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { usePersistentState, createNamespacedStorage } from "@/lib/persist";
+import { Plus, Trash2 } from "lucide-react";
 
 type EditableSourceRow = { name: string; Longitude: string; Latitude: string };
 type AnyRow = Record<string, string | number | boolean | null | undefined>;
@@ -319,33 +320,33 @@ export default function LogisticsUseCasePage() {
         <CardContent className="space-y-6">
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>Sources</Label>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSources((s: EditableSourceRow[]) => [...s, { name: "", Longitude: "", Latitude: "" }])}
-                  >
-                    + Add source
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSources([{ name: "", Longitude: "", Latitude: "" }])}
-                  >
-                    Clear
-                  </Button>
-                </div>
+              <Label>Sources</Label>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSources((s: EditableSourceRow[]) => [...s, { name: "", Longitude: "", Latitude: "" }])}
+                >
+                  <Plus className="mr-1 h-4 w-4" />
+                  Add source
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setSources([{ name: "", Longitude: "", Latitude: "" }])}
+                >
+                  Clear
+                </Button>
               </div>
-              <div className="overflow-auto border rounded-md">
+              <p className="text-xs text-muted-foreground">Enter at least one valid source with name and coordinates.</p>
+              <div className="overflow-auto border rounded-md h-72">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/40">
+                  <thead className="bg-muted/40 sticky top-0 z-10">
                     <tr>
                       <th className="text-left p-2 border-b">Name</th>
                       <th className="text-left p-2 border-b">Longitude</th>
                       <th className="text-left p-2 border-b">Latitude</th>
-                      <th className="text-left p-2 border-b">Actions</th>
+                      <th className="text-left p-2 border-b w-[1%] whitespace-nowrap">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -383,12 +384,13 @@ export default function LogisticsUseCasePage() {
                         </td>
                         <td className="p-2 border-b align-top w-[1%] whitespace-nowrap">
                           <Button
-                            variant="outline"
-                            size="sm"
-                              onClick={() => setSources((prev: EditableSourceRow[]) => prev.filter((_, i) => i !== idx))}
+                            variant="ghost"
+                            size="icon"
+                            aria-label="Remove source"
+                            onClick={() => setSources((prev: EditableSourceRow[]) => prev.filter((_, i) => i !== idx))}
                             disabled={sources.length === 1}
                           >
-                            Remove
+                            <Trash2 className="h-4 w-4" />
                           </Button>
                         </td>
                       </tr>
@@ -396,7 +398,6 @@ export default function LogisticsUseCasePage() {
                   </tbody>
                 </table>
               </div>
-              <p className="text-xs text-muted-foreground">Enter at least one valid source with name and coordinates.</p>
             </div>
             <div className="space-y-3">
               <Label>Destinations</Label>
@@ -404,6 +405,7 @@ export default function LogisticsUseCasePage() {
                 <Input
                   type="file"
                   accept=".csv,text/csv"
+                  className="h-8"
                   onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
@@ -419,6 +421,7 @@ export default function LogisticsUseCasePage() {
                 />
                 <Button
                   variant="outline"
+                  size="sm"
                   onClick={async () => {
                     try {
                       const res = await fetch("/default-destinations.csv", { cache: "no-store" });
@@ -432,9 +435,9 @@ export default function LogisticsUseCasePage() {
                 </Button>
               </div>
               <div className="text-xs text-muted-foreground">Current file: {destFileName} ({destinations.length} rows)</div>
-              <div className="overflow-auto border rounded-md">
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/40">
+              <div className="overflow-auto border rounded-md h-72">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 sticky top-0 z-10">
                     <tr>
                       {destinations.length > 0 &&
                         Object.keys(destinations[0]).map((h) => (

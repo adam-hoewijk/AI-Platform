@@ -9,6 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { toast } from "sonner";
 import { usePersistentState } from "@/lib/persist";
+import { useModelConfig } from "@/lib/model-config";
 
 export default function ChatUseCasePage() {
   const [input, setInput] = usePersistentState<string>("input", "", { namespace: "chat", version: 1 });
@@ -18,6 +19,7 @@ export default function ChatUseCasePage() {
     { namespace: "chat", version: 1 }
   );
   const [isLoading, setIsLoading] = useState(false);
+  const [modelConfig] = useModelConfig();
 
   async function handleSend() {
     if (!input.trim()) return;
@@ -29,7 +31,10 @@ export default function ChatUseCasePage() {
       const res = await fetch("/api/llm/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [...messages, userMessage] }),
+        body: JSON.stringify({ 
+          messages: [...messages, userMessage],
+          modelConfig,
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = (await res.json()) as { role: "assistant"; content: string };

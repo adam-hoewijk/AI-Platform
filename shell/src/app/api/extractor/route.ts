@@ -54,6 +54,14 @@ const RequestSchema = z.object({
   documents: z.array(DocumentSchema).min(1),
   columns: z.array(ColumnSchema).min(1),
   customTypes: z.array(CustomTypeSchema).default([]),
+  modelConfig: z.object({
+    reasoning: z.object({
+      effort: z.enum(["minimal", "low", "medium", "high"]),
+    }),
+    text: z.object({
+      verbosity: z.enum(["low", "medium", "high"]),
+    }),
+  }).optional(),
 });
 
 function getAzureClient() {
@@ -184,7 +192,7 @@ function buildInstructionPrompt(
 export async function POST(req: NextRequest) {
   try {
     const json = await req.json();
-    const { documents, columns, customTypes } = RequestSchema.parse(json);
+    const { documents, columns, customTypes, modelConfig } = RequestSchema.parse(json);
 
     const client = getAzureClient();
     const deployment = process.env.AZURE_OPENAI_DEPLOYMENT as string;
@@ -218,6 +226,10 @@ export async function POST(req: NextRequest) {
             },
           },
           messages,
+          ...(modelConfig && {
+            reasoning_effort: modelConfig.reasoning.effort,
+            verbosity: modelConfig.text.verbosity,
+          }),
         });
 
         const content = completion.choices?.[0]?.message?.content ?? "{}";
