@@ -16,6 +16,7 @@ const applicationLinks = [
   { href: "/use-cases/chat", label: "Chat", icon: MessageSquare },
   { href: "/use-cases/extractor", label: "Extractor", icon: FileText },
   { href: "/use-cases/logistics", label: "Logistics", icon: Truck },
+  { href: "/use-cases/pptx-translator", label: "PPTX Translator", icon: FileText },
 ];
 
 const settingsLinks = [
