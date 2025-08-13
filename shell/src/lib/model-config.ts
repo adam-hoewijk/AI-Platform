@@ -7,7 +7,7 @@ export interface ModelConfig {
   text: {
     verbosity: "low" | "medium" | "high";
   };
-  [key: string]: any;
+  [key: string]: string | number | boolean | null | undefined | ModelConfig[keyof ModelConfig];
 }
 
 export const defaultModelConfig: ModelConfig = {

@@ -85,7 +85,7 @@ export default function SettingsPage() {
                   </SelectContent>
                 </Select>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Controls how concise or verbose the model's text output will be.
+                  Controls how concise or verbose the model&apos;s text output will be.
                 </p>
               </div>
             </div>
