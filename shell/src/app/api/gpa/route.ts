@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import OpenAI from "openai";
 
 // Minimal zod-like runtime validation
@@ -46,10 +45,13 @@ export async function POST(req: Request) {
         return new Response("Server missing Azure Document Intelligence env vars", { status: 500 });
       }
 
-      // dynamic import of the Azure Document Intelligence SDK
-      const aiMod: any = await import("@azure-rest/ai-document-intelligence");
-      const DocumentIntelligence = aiMod.default ?? aiMod;
-      const { getLongRunningPoller, isUnexpected } = aiMod;
+  // dynamic import of the Azure Document Intelligence SDK
+  const aiMod = await import("@azure-rest/ai-document-intelligence");
+  // The SDK's types are not easily expressible here; allow a narrow any for runtime interop.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const DocumentIntelligence = (aiMod as any).default ?? aiMod;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { getLongRunningPoller, isUnexpected } = aiMod as any;
 
       const client = DocumentIntelligence(endpoint, { key });
 
@@ -100,7 +102,7 @@ export async function POST(req: Request) {
       try {
         // This will now be the primary log you see from Document Intelligence.
         console.log("[gpa] Document Intelligence markdown:\n" + text);
-      } catch (logErr) {
+      } catch {
         /* ignore */
       }
     } catch (e) {
@@ -152,7 +154,7 @@ export async function POST(req: Request) {
     });
 
     const content = completion.choices?.[0]?.message?.content ?? "{}";
-    let parsed: any = {};
+  let parsed: Record<string, unknown> = {};
     try {
       parsed = JSON.parse(content);
     } catch {
