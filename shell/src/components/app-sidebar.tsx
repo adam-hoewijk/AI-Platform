@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { Home, MessageSquare, FileText, Truck, Settings } from "lucide-react";
+import { Home, MessageSquare, FileText, Truck, Settings, Globe, Calculator } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -15,7 +15,9 @@ import {
 const applicationLinks = [
   { href: "/use-cases/chat", label: "Chat", icon: MessageSquare },
   { href: "/use-cases/extractor", label: "Extractor", icon: FileText },
+  { href: "/use-cases/gpa", label: "GPA Calculator", icon: Calculator },
   { href: "/use-cases/logistics", label: "Logistics", icon: Truck },
+  { href: "/use-cases/deep-research-urls", label: "Deep research (URLs)", icon: Globe },
 ];
 
 const settingsLinks = [
