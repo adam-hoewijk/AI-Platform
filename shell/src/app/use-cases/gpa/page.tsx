@@ -39,7 +39,6 @@ export default function GpaUseCasePage() {
         setFileNames(files.map(file => file.name));
         setResults([]);
 
-        const newResults: ResultType[] = [];
         try {
             const promises = files.map(async (file) => {
                 const form = new FormData();
