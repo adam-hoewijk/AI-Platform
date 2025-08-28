@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { TrashIcon } from "@radix-ui/react-icons";
 import { isArrayOfStrings } from "@/lib/utils";
 
+// Define the types for your data structures
 type TenderRequirement = {
     text: string;
     source: string;
@@ -26,6 +27,7 @@ type TenderResult = {
     evaluationCriteria: TenderRequirement[];
 };
 
+// Initial state for the results, an empty structure
 const initialState: TenderResult = {
     mandatoryRequirements: [],
     technicalRequirements: [],
@@ -35,14 +37,19 @@ const initialState: TenderResult = {
 };
 
 export default function TenderAnalyzerPage() {
+    // Ref for the file input, though Dropzone handles most of this
     const fileInputRef = useRef<HTMLInputElement | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
-    const [isProcessing, setIsProcessing] = useState(false);
+
+    // State variables for managing loading and results
+    const [isLoading, setIsLoading] = useState(false); // Full-page loading for first upload
+    const [isProcessing, setIsProcessing] = useState(false); // Localized loading for subsequent uploads
     const [results, setResults] = useState<TenderResult>(initialState);
 
+    // Function to handle file uploads
     async function handleFile(files: File[]) {
         if (!files || files.length === 0) return;
         
+        // Determine loading state based on whether this is the first file upload
         const isFirstLoad = !Object.values(results).some(arr => arr.length > 0);
         if (isFirstLoad) {
             setIsLoading(true);
@@ -53,15 +60,18 @@ export default function TenderAnalyzerPage() {
         const newResults = { ...results };
 
         try {
+            // Create a promise for each file to handle uploads concurrently
             const promises = files.map(async (file) => {
                 const form = new FormData();
                 form.append("file", file);
                 
+                // Prepare existing data to send to the API for deduplication
                 const existingTexts = Object.fromEntries(
                     Object.keys(results).map(key => [key, results[key as keyof TenderResult].map(req => req.text)])
                 );
                 form.append("existingRequirements", JSON.stringify(existingTexts));
 
+                // Send the file and existing requirements to the backend API
                 const res = await fetch("/api/tender", {
                     method: "POST",
                     body: form,
@@ -75,12 +85,15 @@ export default function TenderAnalyzerPage() {
                 return { json, fileName: file.name };
             });
 
+            // Wait for all file promises to resolve
             const settledResults = await Promise.all(promises);
 
+            // Process the results from the API
             for (const result of settledResults) {
                 if (!result) continue;
                 const { json, fileName } = result;
                 
+                // List all categories to iterate through
                 const allCategories = [
                     "mandatoryRequirements",
                     "technicalRequirements",
@@ -89,6 +102,7 @@ export default function TenderAnalyzerPage() {
                     "evaluationCriteria",
                 ];
 
+                // Append new requirements to the appropriate category in the state
                 for (const category of allCategories) {
                     if (isArrayOfStrings(json[category])) {
                         for (const text of json[category]) {
@@ -98,17 +112,20 @@ export default function TenderAnalyzerPage() {
                 }
             }
 
+            // Update the state with the new results
             setResults(newResults);
         } catch (err) {
             console.error(err);
             toast.error("An error occurred while processing files.");
         } finally {
+            // Reset loading states regardless of success or failure
             setIsLoading(false);
             setIsProcessing(false);
             if (fileInputRef.current) fileInputRef.current.value = "";
         }
     }
 
+    // Function to handle toggling the checked state of a requirement
     function handleToggle(category: keyof TenderResult, itemIndex: number) {
         setResults(prev => {
             const newCategory = [...prev[category]];
@@ -117,6 +134,7 @@ export default function TenderAnalyzerPage() {
         });
     }
 
+    // Function to delete a requirement
     function handleDelete(category: keyof TenderResult, itemIndex: number) {
         setResults(prev => {
             const newCategory = prev[category].filter((_, i) => i !== itemIndex);
@@ -124,10 +142,12 @@ export default function TenderAnalyzerPage() {
         });
     }
 
+    // Function to clear all requirements
     function clear() {
         setResults(initialState);
     }
     
+    // Check if there are any results to display
     const hasResults = Object.values(results).some(arr => arr.length > 0);
 
     return (
@@ -139,6 +159,7 @@ export default function TenderAnalyzerPage() {
                         <CardTitle className="text-2xl">Tender Document Analyzer</CardTitle>
                         <CardDescription className="text-base">Upload tender documents (PDF, DOCX) to extract and summarize key requirements and evaluation criteria for consulting firms.</CardDescription>
                     </div>
+                    {/* The Clear All button is moved here */}
                     <Button variant="outline" onClick={clear} disabled={isLoading || isProcessing || !hasResults}>
                         Clear All
                     </Button>
@@ -196,6 +217,7 @@ export default function TenderAnalyzerPage() {
                                                             <ul className="list-inside space-y-2 text-sm">
                                                                 {sourceItems.map((item, index) => {
                                                                     const uniqueId = `${category}-${source}-${index}`;
+                                                                    // Find the correct index in the original array to handle state updates
                                                                     const itemIndex = items.findIndex(i => i === item);
 
                                                                     return (
@@ -240,3 +262,4 @@ export default function TenderAnalyzerPage() {
         </main>
     );
 }
+
