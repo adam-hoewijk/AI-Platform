@@ -1,11 +1,25 @@
 import OpenAI from "openai";
 import { isArrayOfStrings } from "@/lib/utils";
+import {
+    getLongRunningPoller,
+    isUnexpected,
+    DocumentIntelligenceClient,
+} from "@azure-rest/ai-document-intelligence";
+import { AzureKeyCredential } from "@azure/core-auth";
 
+/**
+ * Initializes and returns an OpenAI client configured for Azure.
+ */
 function getAzureClient() {
     const apiKey = process.env.AZURE_OPENAI_API_KEY;
     const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
     const apiVersion = process.env.AZURE_OPENAI_API_VERSION ?? "2024-12-01-preview";
-    if (!apiKey || !endpoint) throw new Error("Missing Azure OpenAI environment variables");
+    
+    // Ensure required environment variables are set
+    if (!apiKey || !endpoint) {
+        throw new Error("Missing Azure OpenAI environment variables");
+    }
+
     return new OpenAI({
         apiKey,
         baseURL: `${endpoint}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT}`,
@@ -14,6 +28,10 @@ function getAzureClient() {
     });
 }
 
+/**
+ * The API handler for processing uploaded tender documents.
+ * It extracts text using Azure Document Intelligence and then analyzes it with Azure OpenAI.
+ */
 export async function POST(req: Request) {
     try {
         const contentType = req.headers.get("content-type") || "";
@@ -25,7 +43,9 @@ export async function POST(req: Request) {
         const file = formData.get("file") as File | null;
         const existingRequirements = formData.get("existingRequirements") as string | null;
 
-        if (!file) return new Response("Missing file", { status: 400 });
+        if (!file) {
+            return new Response("Missing file", { status: 400 });
+        }
         
         // Use Azure Document Intelligence to extract text from the uploaded file
         const arrayBuffer = await file.arrayBuffer();
@@ -34,16 +54,15 @@ export async function POST(req: Request) {
             const endpoint = process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT;
             const key = process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY;
             const apiVersion = process.env.AZURE_DOCUMENT_INTELLIGENCE_API_VERSION ?? "2024-11-30";
+            
             if (!endpoint || !key) {
                 console.error("[tender] missing Azure Document Intelligence env vars");
                 return new Response("Server missing Azure Document Intelligence env vars", { status: 500 });
             }
 
-            const aiMod = await import("@azure-rest/ai-document-intelligence");
-            const DocumentIntelligence = (aiMod as any).default ?? aiMod;
-            const { getLongRunningPoller, isUnexpected } = aiMod as any;
-
-            const client = DocumentIntelligence(endpoint, { key });
+            // Create a Document Intelligence client with the correct types
+            const client = new DocumentIntelligenceClient(endpoint, new AzureKeyCredential(key));
+            
             const base64 = Buffer.from(arrayBuffer).toString("base64");
             const jsonBody = { base64Source: base64 };
 
@@ -63,12 +82,14 @@ export async function POST(req: Request) {
                 return new Response("Document Intelligence error", { status: 500 });
             }
 
+            // Use the correctly imported getLongRunningPoller function
             const poller = getLongRunningPoller(client, initialResponse);
             const pollResult = await poller.pollUntilDone();
             const analyzeResult = pollResult?.body?.analyzeResult ?? {};
 
+            // Extract the content from the analysis result
             if (analyzeResult.content && typeof analyzeResult.content === "string") {
-                text = analyzeResult.content as string;
+                text = analyzeResult.content;
             } else if (Array.isArray(analyzeResult.pages) && analyzeResult.pages.length) {
                 const parts: string[] = [];
                 for (const p of analyzeResult.pages) {
@@ -121,11 +142,11 @@ export async function POST(req: Request) {
         const instruction = `Analyze the provided tender document and extract the key requirements for a consulting firm. Categorize them into the following five groups. For each group, provide a concise summary as a list of bullet points. The goal is to give a consulting firm a quick overview of what they need to know to decide whether to bid on this tender and what to focus on in their proposal.
 
 ${exclusionPrompt}
-1.  **Mandatory Requirements (Must-Haves):** Summarize the non-negotiable requirements tied to eligibility.
-2.  **Technical Requirements:** Summarize the capabilities and resources needed to deliver the project.
-3.  **Desirable/Nice-to-Have Features:** Summarize the features or approaches that would add value and differentiate a proposal.
-4.  **Commercial/Contractual Considerations:** Summarize key business and legal terms, such as pricing model and performance metrics.
-5.  **Evaluation Criteria:** Summarize how proposals will be scored or evaluated.
+1.  **Mandatory Requirements (Must-Haves):** Summarize the non-negotiable requirements tied to eligibility.
+2.  **Technical Requirements:** Summarize the capabilities and resources needed to deliver the project.
+3.  **Desirable/Nice-to-Have Features:** Summarize the features or approaches that would add value and differentiate a proposal.
+4.  **Commercial/Contractual Considerations:** Summarize key business and legal terms, such as pricing model and performance metrics.
+5.  **Evaluation Criteria:** Summarize how proposals will be scored or evaluated.
 
 Return strictly a JSON object with the following keys:
 - "mandatoryRequirements": an array of strings summarizing the mandatory requirements, or an empty array if not found.
