@@ -5,7 +5,6 @@ import {
     isUnexpected,
     DocumentIntelligenceClient,
 } from "@azure-rest/ai-document-intelligence";
-import { AzureKeyCredential } from "@azure/core-auth";
 
 /**
  * Initializes and returns an OpenAI client configured for Azure.
@@ -60,8 +59,8 @@ export async function POST(req: Request) {
                 return new Response("Server missing Azure Document Intelligence env vars", { status: 500 });
             }
 
-            // The @azure-rest SDK exports a client factory function
-            const client = DocumentIntelligenceClient(endpoint, new AzureKeyCredential(key));
+            // Create a Document Intelligence client by calling the factory function
+            const client = DocumentIntelligenceClient(endpoint, { key });
             
             const base64 = Buffer.from(arrayBuffer).toString("base64");
             const jsonBody = { base64Source: base64 };
