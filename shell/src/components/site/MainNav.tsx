@@ -9,7 +9,6 @@ const links = [
   { href: "/use-cases/chat", label: "Chat" },
   { href: "/use-cases/extractor", label: "Extractor" },
   { href: "/use-cases/logistics", label: "Logistics" },
-  { href: "/use-cases/deep-research-urls", label: "Deep research (URLs)" },
 ];
 
 export function MainNav() {

@@ -11,3 +11,6 @@ export function isNumber(n: unknown): n is number {
 export function isString(s: unknown): s is string {
   return typeof s === "string" && s.length > 0;
 }
+export function isArrayOfStrings(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(item => typeof item === 'string');
+}
