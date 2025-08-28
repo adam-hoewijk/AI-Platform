@@ -60,8 +60,8 @@ export async function POST(req: Request) {
                 return new Response("Server missing Azure Document Intelligence env vars", { status: 500 });
             }
 
-            // Create a Document Intelligence client with the correct types
-            const client = new DocumentIntelligenceClient(endpoint, new AzureKeyCredential(key));
+            // The @azure-rest SDK exports a client factory function
+            const client = DocumentIntelligenceClient(endpoint, new AzureKeyCredential(key));
             
             const base64 = Buffer.from(arrayBuffer).toString("base64");
             const jsonBody = { base64Source: base64 };
