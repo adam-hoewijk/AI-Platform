@@ -209,13 +209,30 @@ export async function POST(req: NextRequest) {
 
       // dynamic import so SDK is only required at runtime on the server
       const aiMod = await import("@azure-rest/ai-document-intelligence");
-      // tolerate default vs named export
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const DocumentIntelligence = (aiMod as any).default ?? aiMod;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { getLongRunningPoller, isUnexpected } = aiMod as any;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const client = DocumentIntelligence(endpoint, { key } as any);
+
+      // Minimal typed surface for the parts we use to satisfy eslint/TS rules
+      type ADIClient = {
+        path: (path: string, modelId: string) => {
+          post: (opts: {
+            contentType: string;
+            body: unknown;
+            queryParameters?: Record<string, string>;
+          }) => Promise<unknown>;
+        };
+      };
+
+      type ADIModule = {
+        default?: (endpoint: string, options: { key: string }) => ADIClient;
+        getLongRunningPoller?: (client: ADIClient, res: unknown) => { pollUntilDone: () => Promise<unknown> };
+        isUnexpected?: (res: unknown) => boolean;
+      };
+
+      const ai = aiMod as unknown as ADIModule;
+      const DocumentIntelligenceFactory = ai.default ?? (aiMod as unknown as (endpoint: string, options: { key: string }) => ADIClient);
+      if (!DocumentIntelligenceFactory) throw new Error("Failed to load Azure Document Intelligence SDK");
+      const getLongRunningPoller = ai.getLongRunningPoller;
+      const isUnexpected = ai.isUnexpected;
+      const client = DocumentIntelligenceFactory(endpoint, { key });
 
       const fd = await req.formData();
       const files = Array.from(fd.getAll("file")).filter(Boolean) as File[];
@@ -242,8 +259,9 @@ export async function POST(req: NextRequest) {
               },
             });
 
-          if (isUnexpected(initialResponse)) {
-            console.error("ADI initial response unexpected", initialResponse.body);
+          if (isUnexpected ? isUnexpected(initialResponse) : false) {
+            // initialResponse is unknown; log raw value for debugging
+            console.error("ADI initial response unexpected", initialResponse);
             // fallback to raw decode
             let fallback = "";
             try {
@@ -253,9 +271,15 @@ export async function POST(req: NextRequest) {
             continue;
           }
 
-          const poller = getLongRunningPoller(client, initialResponse);
-          const pollResult = await poller.pollUntilDone();
-          const analyzeResult = (pollResult as any)?.body?.analyzeResult ?? {};
+          const poller = getLongRunningPoller ? getLongRunningPoller(client, initialResponse) : null;
+          const pollResult = poller ? await poller.pollUntilDone() : initialResponse;
+          // Lightweight shape for analyzeResult fields we use
+          type AnalyzeResult = {
+            content?: unknown;
+            pages?: Array<{ lines?: Array<{ content?: unknown }> }>;
+          };
+
+          const analyzeResult = (((pollResult as unknown) as { body?: { analyzeResult?: unknown } })?.body?.analyzeResult ?? {}) as AnalyzeResult;
 
           let text = "";
           if (analyzeResult.content && typeof analyzeResult.content === "string") {

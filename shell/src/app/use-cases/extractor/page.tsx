@@ -305,7 +305,11 @@ export default function ExtractorUseCasePage() {
     setResultsByDoc((prev) => {
       const next: Record<string, Record<string, LooseJson>> = {};
       for (const [docId, data] of Object.entries(prev)) {
-        const { [columnId]: _removed, ...rest } = data;
+        const rest: Record<string, LooseJson> = {};
+        for (const [k, v] of Object.entries(data)) {
+          if (k === columnId) continue;
+          rest[k] = v as LooseJson;
+        }
         next[docId] = rest;
       }
       return next;
