@@ -26,7 +26,7 @@ export default function Home() {
           },
           {
             href: "/use-cases/extractor",
-            title: "Contract Management",
+            title: "Extractor",
             description: "Pull structured data from text",
             icon: FileText,
           },

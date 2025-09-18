@@ -16,9 +16,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeKatex from "rehype-katex";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -613,27 +610,7 @@ export default function ExtractorUseCasePage() {
               ) : (
                 documents.map((d) => (
                   <tr key={d.id} className="border-t align-top">
-                    <td className="p-3 font-medium sticky left-0 bg-background z-10">
-                      <Dialog>
-                        <DialogTrigger asChild>
-                          <button className="text-left underline decoration-dotted hover:no-underline">{d.name}</button>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-3xl">
-                          <DialogHeader>
-                            <DialogTitle>{d.name}</DialogTitle>
-                            <DialogDescription>Preview of extracted markdown (scrollable)</DialogDescription>
-                          </DialogHeader>
-                          <div className="prose max-h-[60vh] overflow-auto py-2">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeKatex]}>
-                              {d.text || "*No extracted text available yet.*"}
-                            </ReactMarkdown>
-                          </div>
-                          <DialogFooter>
-                            <Button variant="outline">Close</Button>
-                          </DialogFooter>
-                        </DialogContent>
-                      </Dialog>
-                    </td>
+                    <td className="p-3 font-medium sticky left-0 bg-background z-10">{d.name}</td>
                     {columns.map((c) => {
                       const key = cellKey(d.id, c.id);
                       const value = resultsByDoc[d.id]?.[c.id];
