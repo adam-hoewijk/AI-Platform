@@ -14,7 +14,7 @@ import {
 
 const applicationLinks = [
     { href: "/use-cases/chat", label: "Chat", icon: MessageSquare },
-    { href: "/use-cases/extractor", label: "Extractor", icon: FileText },
+    { href: "/use-cases/extractor", label: "Contract Managmenet", icon: FileText },
     { href: "/use-cases/gpa", label: "GPA Calculator", icon: Calculator },
     { href: "/use-cases/logistics", label: "Logistics", icon: Truck },
     { href: "/use-cases/tender", label: "Tender Analyzer", icon: ClipboardCheck },

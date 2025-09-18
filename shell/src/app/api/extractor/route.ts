@@ -191,6 +191,105 @@ function buildInstructionPrompt(
 
 export async function POST(req: NextRequest) {
   try {
+    const contentType = req.headers.get("content-type") || "";
+
+    // If multipart/form-data, treat this as file upload -> extract text via Azure Document Intelligence
+    if (contentType.includes("multipart/form-data")) {
+      // Minimal random id generator for returned documents
+      function randomId(prefix = "id") {
+        return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
+      }
+
+      const endpoint = process.env.AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT;
+      const key = process.env.AZURE_DOCUMENT_INTELLIGENCE_KEY;
+      const apiVersion = process.env.AZURE_DOCUMENT_INTELLIGENCE_API_VERSION ?? "2024-11-30";
+      if (!endpoint || !key) {
+        throw new Error("Missing Azure Document Intelligence environment variables");
+      }
+
+      // dynamic import so SDK is only required at runtime on the server
+      const aiMod = await import("@azure-rest/ai-document-intelligence");
+      // tolerate default vs named export
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const DocumentIntelligence = (aiMod as any).default ?? aiMod;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { getLongRunningPoller, isUnexpected } = aiMod as any;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const client = DocumentIntelligence(endpoint, { key } as any);
+
+      const fd = await req.formData();
+      const files = Array.from(fd.getAll("file")).filter(Boolean) as File[];
+      const clientIds = fd.getAll("clientId").map((v) => String(v));
+      if (files.length === 0) return new Response("No files uploaded", { status: 400 });
+
+      const documents: { id: string; name: string; text: string }[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const providedId = clientIds[i] ?? undefined;
+        try {
+          const arrayBuffer = await f.arrayBuffer();
+          const base64 = Buffer.from(arrayBuffer).toString("base64");
+          const jsonBody = { base64Source: base64 };
+
+          const initialResponse = await client
+            .path("/documentModels/{modelId}:analyze", "prebuilt-layout")
+            .post({
+              contentType: "application/json",
+              body: jsonBody,
+              queryParameters: {
+                "api-version": apiVersion,
+                outputContentFormat: "markdown",
+              },
+            });
+
+          if (isUnexpected(initialResponse)) {
+            console.error("ADI initial response unexpected", initialResponse.body);
+            // fallback to raw decode
+            let fallback = "";
+            try {
+              fallback = new TextDecoder("utf-8").decode(arrayBuffer);
+            } catch {}
+            documents.push({ id: providedId ?? randomId("doc"), name: f.name, text: fallback });
+            continue;
+          }
+
+          const poller = getLongRunningPoller(client, initialResponse);
+          const pollResult = await poller.pollUntilDone();
+          const analyzeResult = (pollResult as any)?.body?.analyzeResult ?? {};
+
+          let text = "";
+          if (analyzeResult.content && typeof analyzeResult.content === "string") {
+            text = analyzeResult.content as string;
+          } else if (Array.isArray(analyzeResult.pages) && analyzeResult.pages.length) {
+            const parts: string[] = [];
+            for (const p of analyzeResult.pages) {
+              if (Array.isArray(p.lines)) {
+                for (const line of p.lines) {
+                  if (line && typeof line.content === "string") parts.push(line.content);
+                }
+              }
+            }
+            text = parts.join("\n");
+          }
+
+          if (!text) {
+            try {
+              text = new TextDecoder("utf-8").decode(arrayBuffer);
+            } catch {
+              text = "";
+            }
+          }
+
+          documents.push({ id: providedId ?? randomId("doc"), name: f.name, text });
+        } catch (err) {
+          console.error("Failed to process file", err);
+          documents.push({ id: providedId ?? randomId("doc"), name: f.name, text: "" });
+        }
+      }
+
+      return new Response(JSON.stringify({ documents }), { headers: { "Content-Type": "application/json" } });
+    }
+
     const json = await req.json();
     const { documents, columns, customTypes, modelConfig } = RequestSchema.parse(json);
 

@@ -16,6 +16,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import rehypeKatex from "rehype-katex";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -176,18 +179,71 @@ export default function ExtractorUseCasePage() {
   }, [handleResize, handleResizeEnd]);
 
 
+  const supportedTypes = [
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/msword",
+    "text/plain",
+    "application/rtf",
+    "image/png",
+    "image/jpeg",
+    "image/tiff",
+  ];
+
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const newDocs: UploadedDoc[] = [];
-    for (const f of Array.from(files)) {
-      const text = await f.text();
-      newDocs.push({ id: randomId("doc"), name: f.name, text });
-    }
-    setDocuments((prev) => [...prev, ...newDocs]);
+
+    const fileArray = Array.from(files);
+
+    // Create client-side placeholders immediately so the UI shows files and "Extracting…"
+    const clientDocs: UploadedDoc[] = fileArray.map((f) => ({ id: randomId("doc"), name: f.name, text: "" }));
+    setDocuments((prev) => [...prev, ...clientDocs]);
+
+    // Mark extraction loading for these new docs across existing columns
     if (columns.length > 0) {
-      void extractForNewDocuments(newDocs, columns);
+      const docIds = clientDocs.map((d) => d.id);
+      const colIds = columns.map((c) => c.id);
+      markCellsLoading(docIds, colIds);
     }
-    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    try {
+      const form = new FormData();
+      for (let i = 0; i < fileArray.length; i++) {
+        form.append("file", fileArray[i]);
+        form.append("clientId", clientDocs[i].id);
+      }
+
+      const res = await fetch("/api/extractor", { method: "POST", body: form });
+      if (!res.ok) throw new Error(await res.text());
+      const body = (await res.json()) as { documents: { id: string; name: string; text: string }[] };
+
+      // Update documents with extracted text returned from server (match by id)
+      setDocuments((prev) => {
+        const byId = new Map(prev.map((d) => [d.id, d]));
+        for (const d of body.documents) {
+          const existing = byId.get(d.id);
+          if (existing) {
+            byId.set(d.id, { ...existing, text: d.text });
+          } else {
+            byId.set(d.id, { id: d.id, name: d.name, text: d.text });
+          }
+        }
+        return Array.from(byId.values());
+      });
+
+      const returnedDocs = body.documents.map((d) => ({ id: d.id, name: d.name, text: d.text }));
+      if (columns.length > 0 && returnedDocs.length > 0) {
+        void extractForNewDocuments(returnedDocs, columns);
+      }
+    } catch (err) {
+      console.error(err);
+      alert(`Failed to upload files: ${err instanceof Error ? err.message : String(err)}`);
+      // on failure, clear loading markers for these docs
+      const failedIds = clientDocs.map((d) => d.id);
+      markCellsDone(failedIds, columns.map((c) => c.id));
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   function removeDocument(id: string) {
@@ -505,8 +561,17 @@ export default function ExtractorUseCasePage() {
 
       <section className="space-y-3">
         <div className="flex items-center gap-2">
-          <Input ref={fileInputRef} type="file" multiple onChange={(e) => handleFilesSelected(e.target.files)} />
+          <Input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={supportedTypes.join(",")}
+            onChange={(e) => handleFilesSelected(e.target.files)}
+          />
           <Button variant="outline" onClick={() => fileInputRef.current?.click()}>Browse</Button>
+        </div>
+        <div className="text-xs text-muted-foreground mt-1">
+          Supported formats: PDF, DOCX, DOC, TXT, RTF, PNG, JPEG, TIFF
         </div>
 
         <div className="rounded-md border overflow-x-auto">
@@ -548,7 +613,27 @@ export default function ExtractorUseCasePage() {
               ) : (
                 documents.map((d) => (
                   <tr key={d.id} className="border-t align-top">
-                    <td className="p-3 font-medium sticky left-0 bg-background z-10">{d.name}</td>
+                    <td className="p-3 font-medium sticky left-0 bg-background z-10">
+                      <Dialog>
+                        <DialogTrigger asChild>
+                          <button className="text-left underline decoration-dotted hover:no-underline">{d.name}</button>
+                        </DialogTrigger>
+                        <DialogContent className="max-w-3xl">
+                          <DialogHeader>
+                            <DialogTitle>{d.name}</DialogTitle>
+                            <DialogDescription>Preview of extracted markdown (scrollable)</DialogDescription>
+                          </DialogHeader>
+                          <div className="prose max-h-[60vh] overflow-auto py-2">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeKatex]}>
+                              {d.text || "*No extracted text available yet.*"}
+                            </ReactMarkdown>
+                          </div>
+                          <DialogFooter>
+                            <Button variant="outline">Close</Button>
+                          </DialogFooter>
+                        </DialogContent>
+                      </Dialog>
+                    </td>
                     {columns.map((c) => {
                       const key = cellKey(d.id, c.id);
                       const value = resultsByDoc[d.id]?.[c.id];
