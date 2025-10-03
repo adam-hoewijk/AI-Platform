@@ -34,12 +34,12 @@ export default function RootLayout({
             <AppSidebar />
             <SidebarInset>
               <div className="border-b">
-                <div className="container mx-auto h-14 flex items-center justify-between px-4">
+                <div className="w-full h-14 flex items-center justify-between px-4">
                   <SidebarTrigger />
                   <div className="flex-1" />
                 </div>
               </div>
-              <div className="container mx-auto px-4 py-6">{children}</div>
+              <div className="w-full px-4 py-6">{children}</div>
             </SidebarInset>
           </SidebarProvider>
           <Toaster richColors position="top-right" />

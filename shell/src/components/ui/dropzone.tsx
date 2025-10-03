@@ -54,10 +54,10 @@ function Dropzone({ accept, maxFiles = 1, className, onFiles }: DropzoneProps) {
                 className
             )}
         >
-            <input ref={inputRef} type="file" accept={accept} onChange={onChange} className="hidden" />
+            <input ref={inputRef} type="file" accept={accept} multiple={maxFiles > 1} onChange={onChange} className="hidden" />
             <div className="flex flex-col items-center justify-center gap-2">
                 <UploadIcon className="h-8 w-8 text-muted-foreground" />
-                <div className="text-sm font-medium">Drop a PDF here, or click to browse</div>
+                <div className="text-sm font-medium">Drop PDF(s) here, or click to browse</div>
                 <div className="text-xs text-muted-foreground">Accepted: {accept ?? "any"}</div>
             </div>
         </div>
