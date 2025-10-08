@@ -246,7 +246,7 @@ export async function POST(req: NextRequest) {
         try {
           const arrayBuffer = await f.arrayBuffer();
           const base64 = Buffer.from(arrayBuffer).toString("base64");
-          const jsonBody = { base64Source: base64 };
+          const jsonBody = { base64Source: base64, pages: ["1-"] };
 
           const initialResponse = await client
             .path("/documentModels/{modelId}:analyze", "prebuilt-layout")

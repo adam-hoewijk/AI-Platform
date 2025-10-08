@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { usePersistentState, LooseJson, createNamespacedStorage } from "@/lib/persist";
 import { useModelConfig } from "@/lib/model-config";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import remarkBreaks from "remark-breaks";
+import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
+import "katex/dist/katex.min.css";
 import {
   Dialog,
   DialogContent,
@@ -102,6 +109,69 @@ function createExtractionCacheKey(docId: string, colId: string, docText: string,
   return simpleHash(inputStr);
 }
 
+function ReadingSnippets({
+  text,
+  seed,
+  chunkSize = 5,
+  intervalMs = 100,
+}: {
+  text: string;
+  seed: string;
+  chunkSize?: number;
+  intervalMs?: number;
+}) {
+  const cleaned = useMemo(() => {
+    const base = (text || "").replace(/\s+/g, " ").trim();
+    // Ensure minimum length by repeating if necessary to produce rolling snippets
+    if (base.length === 0) return "reading in progress";
+    if (base.length < chunkSize + 1) return base.repeat(Math.ceil((chunkSize + 1) / Math.max(1, base.length)) + 1);
+    return base;
+  }, [text, chunkSize]);
+
+  const snippets = useMemo(() => {
+    const arr: string[] = [];
+    for (let i = 0; i <= cleaned.length - chunkSize; i++) {
+      arr.push(cleaned.slice(i, i + chunkSize));
+    }
+    // Fallback to synthetic content if something went wrong
+    if (arr.length === 0) {
+      return ["reading", "through", "text…"]; // lengths may vary, fine
+    }
+    return arr;
+  }, [cleaned, chunkSize]);
+
+  const startOffset = useMemo(() => {
+    // Use existing simpleHash to create a deterministic offset so cells don't sync
+    const num = parseInt(simpleHash(seed), 36);
+    return snippets.length > 0 ? num % snippets.length : 0;
+  }, [seed, snippets.length]);
+
+  const [idx, setIdx] = useState<number>(startOffset);
+
+  useEffect(() => {
+    setIdx(startOffset);
+  }, [startOffset]);
+
+  useEffect(() => {
+    if (snippets.length === 0) return;
+    const id = setInterval(() => {
+      setIdx((i) => (i + 1) % snippets.length);
+    }, intervalMs);
+    return () => clearInterval(id);
+  }, [snippets.length, intervalMs]);
+
+  const current = snippets.length > 0 ? snippets[idx] : "";
+
+  return (
+    <div className="flex items-center gap-2 text-muted-foreground">
+      <span className="inline-block h-2 w-2 rounded-full bg-primary animate-pulse" />
+      <span className="text-xs font-mono tabular-nums break-words truncate" title={cleaned}>
+        {current}
+      </span>
+    </div>
+  );
+}
+
 export default function ExtractorUseCasePage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [documents, setDocuments] = usePersistentState<UploadedDoc[]>("documents", [], { namespace: "extractor", version: 1 });
@@ -118,9 +188,17 @@ export default function ExtractorUseCasePage() {
   );
   const [loadingCells, setLoadingCells] = useState<Set<string>>(new Set());
   const [openColumnId, setOpenColumnId] = useState<string | null>(null);
+  const [openDocId, setOpenDocId] = useState<string | null>(null);
 
   const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
   const isResizing = useRef<string | null>(null);
+  
+  const clampStyle = useMemo(() => ({
+    display: "-webkit-box",
+    WebkitLineClamp: 3,
+    WebkitBoxOrient: "vertical" as const,
+    overflow: "hidden",
+  }), []);
   
   const extractionCache = createNamespacedStorage("extractor-results");
   const [modelConfig] = useModelConfig();
@@ -213,6 +291,17 @@ export default function ExtractorUseCasePage() {
       const res = await fetch("/api/extractor", { method: "POST", body: form });
       if (!res.ok) throw new Error(await res.text());
       const body = (await res.json()) as { documents: { id: string; name: string; text: string }[] };
+      // temporary logs: full extracted text for each returned document
+      try {
+        for (const d of body.documents) {
+          console.log("[extractor][temporary logs] full document text", {
+            id: d.id,
+            name: d.name,
+            length: d.text?.length ?? 0,
+          });
+          console.log(d.text ?? "");
+        }
+      } catch {}
 
       // Update documents with extracted text returned from server (match by id)
       setDocuments((prev) => {
@@ -582,7 +671,6 @@ export default function ExtractorUseCasePage() {
               {columns.map((c) => (
                 <col key={c.id} style={{ width: `${columnWidths[c.id]}px` }} />
               ))}
-              <col style={{ width: "100px" }} />
             </colgroup>
             <thead className="bg-muted/40">
               <tr>
@@ -601,7 +689,6 @@ export default function ExtractorUseCasePage() {
                     />
                   </th>
                 ))}
-                <th className="w-16"></th>
               </tr>
             </thead>
             <tbody>
@@ -614,7 +701,37 @@ export default function ExtractorUseCasePage() {
               ) : (
                 documents.map((d) => (
                   <tr key={d.id} className="border-t align-top">
-                    <td className="p-3 font-medium sticky left-0 bg-background z-10">{d.name}</td>
+                    <td className="p-3 font-medium sticky left-0 bg-background z-10">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          aria-label="Remove document"
+                          onClick={() => {
+                            setResultsByDoc((prev) => {
+                              const next: Record<string, Record<string, LooseJson>> = { ...prev };
+                              delete next[d.id];
+                              return next;
+                            });
+                            setLoadingCells((prev) => {
+                              const next = new Set(Array.from(prev));
+                              for (const c of columns) next.delete(cellKey(d.id, c.id));
+                              return next;
+                            });
+                            removeDocument(d.id);
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                        <button
+                          className="truncate underline decoration-dotted hover:no-underline"
+                          onClick={() => setOpenDocId(d.id)}
+                          title="Preview document"
+                        >
+                          {d.name}
+                        </button>
+                      </div>
+                    </td>
                     {columns.map((c) => {
                       const key = cellKey(d.id, c.id);
                       const value = resultsByDoc[d.id]?.[c.id];
@@ -626,7 +743,7 @@ export default function ExtractorUseCasePage() {
                         if (value == null) return <span className="text-xs text-muted-foreground">—</span>;
                         if (!isMany) {
                           if (c.type.kind === "base") {
-                            if (typeof value === "string") return <span>{truncate(value)}</span>;
+                            if (typeof value === "string") return <span>{value}</span>;
                             if (typeof value === "number" || typeof value === "boolean") return <span>{String(value)}</span>;
                             if (isPlainObject(value)) {
                               const entries = Object.entries(value).filter(([, v]) => v != null).slice(0, 3);
@@ -640,7 +757,7 @@ export default function ExtractorUseCasePage() {
                                 </span>
                               );
                             }
-                            return <span className="text-xs text-muted-foreground">{truncate(pretty(value))}</span>;
+                            return <span className="text-xs text-muted-foreground">{pretty(value)}</span>;
                           } else {
                             if (isPlainObject(value)) {
                               const entries = Object.entries(value).filter(([, v]) => v != null).slice(0, 3);
@@ -655,7 +772,7 @@ export default function ExtractorUseCasePage() {
                                 </span>
                               );
                             }
-                            return <span className="text-xs text-muted-foreground">{truncate(pretty(value))}</span>;
+                            return <span className="text-xs text-muted-foreground">{pretty(value)}</span>;
                           }
                         } else {
                           if (c.type.kind === "base") {
@@ -665,7 +782,7 @@ export default function ExtractorUseCasePage() {
                               <span>
                                 {count} item{count === 1 ? "" : "s"}
                                 {count > 0 && (
-                                  <span className="text-xs text-muted-foreground"> — {truncate(preview)}</span>
+                                  <span className="text-xs text-muted-foreground"> — {preview}</span>
                                 )}
                               </span>
                             );
@@ -681,7 +798,7 @@ export default function ExtractorUseCasePage() {
                               <span>
                                 {count} item{count === 1 ? "" : "s"}
                                 {summary && (
-                                  <span className="text-xs text-muted-foreground"> — {truncate(summary)}</span>
+                                  <span className="text-xs text-muted-foreground"> — {summary}</span>
                                 )}
                               </span>
                             );
@@ -746,50 +863,37 @@ export default function ExtractorUseCasePage() {
                       return (
                         <td key={c.id} className="p-3">
                           {isLoading ? (
-                            <div className="flex items-center gap-2 text-muted-foreground">
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              <span className="text-xs">Extracting…</span>
-                            </div>
+                            <ReadingSnippets
+                              text={d.text || d.name}
+                              seed={cellKey(d.id, c.id)}
+                              chunkSize={5}
+                              intervalMs={2}
+                            />
                           ) : value === undefined ? (
                             <span className="text-xs text-muted-foreground">—</span>
                           ) : (
                             <Dialog>
                               <DialogTrigger asChild>
                                 <button className="block w-full text-left">
-                                  <div className="text-sm break-words">
+                                  <div className="text-sm break-words" style={clampStyle}>
                                     {renderInlinePreview()}
                                   </div>
                                 </button>
                               </DialogTrigger>
-                              <DialogContent className="max-w-3xl">
+      <DialogContent className="w-[96vw] md:w-auto max-w-[96vw] md:max-w-3xl lg:max-w-4xl max-h-[95vh] md:max-h-[85vh] overflow-auto">
                                 <DialogHeader>
                                   <DialogTitle>{c.name}</DialogTitle>
                                   <DialogDescription>{c.description}</DialogDescription>
                                 </DialogHeader>
-                                {renderDialogValue()}
+        <div className="overflow-auto max-h-[80vh] md:max-h-[70vh] pr-1">
+          {renderDialogValue()}
+        </div>
                               </DialogContent>
                             </Dialog>
                           )}
                         </td>
                       );
                     })}
-                    <td className="p-3">
-                      <Button size="sm" variant="ghost" onClick={() => {
-                        setResultsByDoc((prev) => {
-                          const next: Record<string, Record<string, LooseJson>> = { ...prev };
-                          delete next[d.id];
-                          return next;
-                        });
-                        setLoadingCells((prev) => {
-                          const next = new Set(Array.from(prev));
-                          for (const c of columns) next.delete(cellKey(d.id, c.id));
-                          return next;
-                        });
-                        removeDocument(d.id);
-                      }}>
-                        Remove
-                      </Button>
-                    </td>
                   </tr>
                 ))
               )}
@@ -797,6 +901,30 @@ export default function ExtractorUseCasePage() {
           </table>
         </div>
       </section>
+
+      {/* Document preview dialog */}
+      <Dialog open={Boolean(openDocId)} onOpenChange={(open) => !open && setOpenDocId(null)}>
+        {openDocId && (
+          <DialogContent className="w-[96vw] md:w-auto max-w-[96vw] md:max-w-3xl lg:max-w-4xl max-h-[95vh] md:max-h-[85vh] overflow-auto">
+            <DialogHeader>
+              <DialogTitle>
+                {documents.find((x) => x.id === openDocId)?.name ?? "Document"}
+              </DialogTitle>
+              <DialogDescription>Markdown preview</DialogDescription>
+            </DialogHeader>
+            <div className="overflow-auto max-h-[80vh] md:max-h-[70vh] pr-1">
+              <div className="prose dark:prose-invert max-w-none">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath, remarkBreaks]}
+                  rehypePlugins={[rehypeRaw, rehypeKatex]}
+                >
+                  {documents.find((x) => x.id === openDocId)?.text || ""}
+                </ReactMarkdown>
+              </div>
+            </div>
+          </DialogContent>
+        )}
+      </Dialog>
       
       <Dialog open={isAddingType} onOpenChange={setIsAddingType}>
         <DefineTypeDialog
@@ -888,7 +1016,7 @@ function AddColumnDialog({
         </div>
         <div className="grid gap-2">
           <Label htmlFor="col-desc">Description</Label>
-          <Textarea id="col-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
+          <Textarea id="col-desc" rows={4} className="min-h-24 resize-y" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div className="grid gap-2">
@@ -995,25 +1123,31 @@ function DefineTypeDialog({
   }
 
   return (
-    <DialogContent className="max-w-2xl">
+    <DialogContent className="w-[96vw] md:w-auto max-w-[96vw] md:max-w-3xl lg:max-w-4xl max-h-[95vh] md:max-h-[85vh] overflow-auto">
       <DialogHeader>
         <DialogTitle>Define custom type</DialogTitle>
         <DialogDescription>
           Provide a name, description, and attributes that define this type.
         </DialogDescription>
       </DialogHeader>
-      <div className="grid gap-4">
+      <div className="grid gap-4 overflow-auto max-h-[80vh] md:max-h-[70vh] pr-1">
         <div className="grid gap-2">
           <Label htmlFor="t-name">Name</Label>
           <Input id="t-name" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div className="grid gap-2">
           <Label htmlFor="t-desc">Description</Label>
-          <Textarea id="t-desc" value={description} onChange={(e) => setDescription(e.target.value)} />
+          <Textarea id="t-desc" rows={4} className="min-h-24 resize-y" value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
 
-        <div className="rounded-md border overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-md border overflow-auto">
+          <table className="w-full text-sm table-fixed">
+            <colgroup>
+              <col className="w-[26%]" />
+              <col className="w-[44%]" />
+              <col className="w-[20%]" />
+              <col className="w-[10%]" />
+            </colgroup>
             <thead className="bg-muted/40">
               <tr>
                 <th className="text-left p-3">Attribute</th>
@@ -1040,8 +1174,10 @@ function DefineTypeDialog({
                     />
                   </td>
                   <td className="p-3">
-                    <Input
+                    <Textarea
                       placeholder="description"
+                      rows={3}
+                      className="min-h-20 resize-y"
                       value={a.description}
                       onChange={(e) => updateAttribute(i, "description", e.target.value)}
                     />
@@ -1127,20 +1263,20 @@ function ColumnDetailsDialog({
 
   return (
     <Dialog open={Boolean(column)} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-2xl">
+    <DialogContent className="w-[96vw] md:w-auto max-w-[96vw] md:max-w-3xl lg:max-w-4xl max-h-[95vh] md:max-h-[85vh] overflow-auto">
         <DialogHeader>
           <DialogTitle>Column details</DialogTitle>
           <DialogDescription>View or modify the column, remove it, or re-extract this column only.</DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4">
+        <div className="grid gap-4 overflow-auto max-h-[80vh] md:max-h-[70vh] pr-1">
           <div className="grid gap-1">
             <Label>Name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="grid gap-1">
             <Label>Description</Label>
-            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Textarea rows={4} className="min-h-24 resize-y" value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="grid gap-1">
@@ -1222,14 +1358,14 @@ function ManageTypesDialog({
   }
 
   return (
-    <DialogContent>
+    <DialogContent className="w-[96vw] md:w-auto max-w-[96vw] md:max-w-3xl lg:max-w-4xl max-h-[95vh] md:max-h-[85vh] overflow-auto">
       <DialogHeader>
         <DialogTitle>Manage custom types</DialogTitle>
         <DialogDescription>
           Add, edit, or remove custom type definitions.
         </DialogDescription>
       </DialogHeader>
-      <div className="max-h-[60vh] overflow-y-auto space-y-2 pr-2">
+      <div className="overflow-auto max-h-[80vh] md:max-h-[70vh] space-y-2 pr-2">
         {customTypes.length === 0 ? (
            <div className="text-sm text-muted-foreground text-center p-4">
              No custom types defined yet.
@@ -1310,14 +1446,14 @@ function EditTypeDialog({
   }
 
   return (
-    <DialogContent className="max-w-2xl">
+    <DialogContent className="w-[96vw] md:w-auto max-w-[96vw] md:max-w-3xl lg:max-w-4xl max-h-[95vh] md:max-h-[85vh] overflow-auto">
       <DialogHeader>
         <DialogTitle>Edit custom type: {originalName}</DialogTitle>
         <DialogDescription>
           Modify the name, description, or attributes for this type.
         </DialogDescription>
       </DialogHeader>
-      <div className="grid gap-4">
+      <div className="grid gap-4 overflow-auto max-h-[80vh] md:max-h-[70vh] pr-1">
         <div className="grid gap-2">
           <Label htmlFor="t-name-edit">Name</Label>
           <Input
@@ -1330,13 +1466,21 @@ function EditTypeDialog({
           <Label htmlFor="t-desc-edit">Description</Label>
           <Textarea
             id="t-desc-edit"
+            rows={4}
+            className="min-h-24 resize-y"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
         </div>
 
-        <div className="rounded-md border overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-md border overflow-auto">
+          <table className="w-full text-sm table-fixed">
+            <colgroup>
+              <col className="w-[26%]" />
+              <col className="w-[44%]" />
+              <col className="w-[20%]" />
+              <col className="w-[10%]" />
+            </colgroup>
             <thead className="bg-muted/40">
               <tr>
                 <th className="text-left p-3">Attribute</th>
@@ -1356,8 +1500,10 @@ function EditTypeDialog({
                     />
                   </td>
                   <td className="p-3">
-                    <Input
+                    <Textarea
                       placeholder="description"
+                      rows={3}
+                      className="min-h-20 resize-y"
                       value={a.description}
                       onChange={(e) =>
                         updateAttribute(i, "description", e.target.value)
